@@ -1,0 +1,51 @@
+# PlantPi configuration (v3: Raspberry Pi Pico sensor node + stepper peristaltic pump)
+# On the Pi this file lives at /etc/plantpi/config.toml
+# Raspberry Pi GPIO numbers are BCM names (GPIO18), not physical pin numbers (pin 12).
+
+[node]
+# The Raspberry Pi Pico sensor node (MicroPython), on a Pi USB port with a DATA micro-USB cable.
+port = "auto"             # or e.g. "/dev/ttyACM0" / "/dev/serial/by-id/usb-MicroPython_Board_in_FS_mode_..."
+baud = 115200             # ignored by the Pico's USB serial, kept for other boards
+dtr = true                # the Pico only sends while DTR is on
+stale_s = 10              # no message for this long = node silent = no watering
+
+[tank]
+sensor = "tank"           # sensor name sent by the Pico: GP27 = pin 32 (probe upright in the tank)
+min_pct = 15              # below this tank level, never start the pump
+stop_pct = 10             # a running pump stops if the level falls below this
+
+[control]
+sample_interval_s = 60    # how often the readings are logged and the pots checked
+startup_holdoff_min = 10  # no automatic watering for this long after the service starts
+time_check_interval_s = 600
+
+[motor]
+steps_per_rev = 2048      # 28BYJ-48 in full-step mode (output shaft, after the gearbox)
+step_delay_ms = 3.0       # 3 ms/step ~ 9.8 rpm; below ~2 ms the motor may skip steps
+relay_active_high = true  # set false if relay test shows the relay is ON when it should be OFF
+
+[[pot]]
+name = "Pot 1"
+sensor = "pot1"                 # Pico GP26 = pin 31
+relay_gpio = 18                 # Pi physical pin 12 -> relay IN (switches the motor 5 V)
+motor_gpios = [17, 27, 22, 24]  # Pi pins 11, 13, 15, 18 -> ULN2003 IN1, IN2, IN3, IN4
+reverse = false                 # flip if the pump sucks instead of pushing
+threshold_pct = 35              # water when the soil is drier than this
+dose_ml = 30                    # water per dose (hard limit 250 ml / 20 min in code)
+ml_per_rev = 0.30               # MEASURE IT: plantpi test pump 1
+cooldown_min = 60               # minimum time between automatic doses of this pot
+max_doses_per_day = 4
+
+# --- Pot 2: remove the leading "# " from the 11 lines below once the second
+# --- motor + ULN2003 board and probe 2 are wired (W27-W36 on the drawing).
+# [[pot]]
+# name = "Pot 2"
+# sensor = "pot2"                 # Pico GP28 = pin 34
+# relay_gpio = 18                 # the SAME relay: its NO feeds both ULN2003 boards
+# motor_gpios = [12, 16, 20, 21]  # Pi pins 32, 36, 38, 40 -> ULN2003 #2 IN1..IN4
+# reverse = false
+# threshold_pct = 35
+# dose_ml = 30
+# ml_per_rev = 0.30
+# cooldown_min = 60
+# max_doses_per_day = 4

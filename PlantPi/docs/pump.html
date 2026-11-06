@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jak działa pompa PlantPi</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;800&family=IBM+Plex+Sans:wght@400;600&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+<style>
+:root {
+  /* Layout: one column; two animated figures (whole system, pump close-up) with a calculator underneath. */
+  --bg: #f3f5f7;
+  --ink: #17232b;
+  --muted: #5a6a74;
+  --panel: #ffffff;
+  --line: #d6dde2;
+  --water: #1f7fd1;
+  --water-soft: #bfdcf5;
+  --pump: #2f9a55;
+  --rotor: #3b6fd8;
+  --roller: #e7b21f;
+  --soil: #6b4a35;
+  --warn: #b5481f;
+  --display: "Archivo", "Segoe UI", system-ui, sans-serif;
+  --body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #11181d; --ink: #e6edf1; --muted: #9aaab4; --panel: #19232a; --line: #2c3a43;
+    --water: #4aa6f0; --water-soft: #1d4566; --pump: #49b86f; --rotor: #6e95ea; --roller: #f0c443;
+    --soil: #8a6448; --warn: #ef8a5f; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #11181d; --ink: #e6edf1; --muted: #9aaab4; --panel: #19232a; --line: #2c3a43;
+  --water: #4aa6f0; --water-soft: #1d4566; --pump: #49b86f; --rotor: #6e95ea; --roller: #f0c443;
+  --soil: #8a6448; --warn: #ef8a5f; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--ink); font: 16px/1.55 var(--body); }
+main { max-width: 1040px; margin: 0 auto; padding: 28px 16px 64px; display: grid; gap: 28px; }
+h1, h2 { font-family: var(--display); text-wrap: balance; margin: 0; }
+h1 { font-size: clamp(26px, 4vw, 36px); font-weight: 800; letter-spacing: -0.01em; }
+h2 { font-size: 21px; font-weight: 800; }
+p { margin: 0; max-width: 68ch; }
+.lead { color: var(--muted); margin-top: 6px; }
+section { display: grid; gap: 12px; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
+svg { display: block; width: 100%; height: auto; }
+svg text { font-family: var(--body); fill: var(--ink); }
+svg .mono { font-family: var(--mono); }
+.controls { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; }
+button { font: 600 14px var(--body); color: var(--panel); background: var(--ink); border: 0; border-radius: 8px;
+  padding: 8px 14px; cursor: pointer; }
+button:focus-visible, select:focus-visible, input:focus-visible { outline: 3px solid var(--water); outline-offset: 2px; }
+label { font-size: 14px; color: var(--muted); display: flex; gap: 8px; align-items: center; }
+select, input[type=number] { font: 14px var(--body); color: var(--ink); background: var(--bg); border: 1px solid var(--line);
+  border-radius: 6px; padding: 5px 8px; }
+input[type=number] { width: 80px; }
+input[type=range] { accent-color: var(--water); }
+.steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; }
+.step { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; font-size: 15px; }
+.step > b:first-child { display: block; font-family: var(--display); font-size: 15px; margin-bottom: 4px; }
+.step code { font-family: var(--mono); font-size: 13px; overflow-wrap: anywhere; }
+.step .n { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 50%;
+  background: var(--water); color: var(--panel); font: 700 13px var(--body); margin-right: 6px; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.tile { background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+.tile .v { font: 600 22px var(--mono); font-variant-numeric: tabular-nums; }
+.tile .k { font-size: 13px; color: var(--muted); }
+.msg { font-size: 14px; padding: 8px 12px; border-radius: 8px; border-left: 4px solid var(--pump); background: var(--bg); }
+.msg.bad { border-left-color: var(--warn); }
+table { border-collapse: collapse; width: 100%; font-size: 14.5px; }
+th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { color: var(--muted); font-weight: 600; font-size: 13px; }
+td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.wide { overflow-x: auto; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; color: var(--muted); }
+.legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+</style>
+</head>
+<body>
+<main>
+<header>
+  <h1>Jak pompa PlantPi przelewa wodę</h1>
+  <p class="lead">Pompa perystaltyczna na silniku 28BYJ-48: wirnik z trzema rolkami ściska miękką rurkę i przesuwa
+  zamknięte w niej porcje wody z wiadra do doniczki. Woda nigdy nie dotyka silnika ani pompy.</p>
+</header>
+
+<section aria-labelledby="h-sys">
+  <h2 id="h-sys">1. Cały układ: gdzie podpiąć rurkę</h2>
+  <div class="panel">
+    <svg id="sys" viewBox="0 0 900 400" role="img" aria-label="Animacja: rurka wejściowa zaczyna się na dnie wiadra, idzie do pompy na pokrywie, a rurka wyjściowa kończy się nad ziemią w doniczce, skąd kapie woda"></svg>
+  </div>
+  <div class="steps">
+    <div class="step"><b><span class="n">1</span>Wejście</b>Koniec rurki na <b>dnie wiadra</b>. Przywiąż do niego
+      mały obciążnik (śrubka, nakrętka), żeby nie wypływał. Drugi koniec do <b>lewej szczeliny</b> pompy.</div>
+    <div class="step"><b><span class="n">2</span>Przez pompę</b>Rurka idzie dookoła rolek, pod ściankę obudowy, i wychodzi
+      <b>prawą szczeliną</b>. To jeden ciągły kawałek rurki, bez łączenia w środku.</div>
+    <div class="step"><b><span class="n">3</span>Wyjście</b>Koniec rurki <b>nad ziemią</b>, przy brzegu doniczki, 3–5 cm
+      od sondy. Przypnij go do patyczka albo drutu. Nie wbijaj go w ziemię, bo się zatka.</div>
+    <div class="step"><b><span class="n">4</span>Zły kierunek?</b>Jeśli woda leci z doniczki do wiadra, ustaw
+      <code>reverse = true</code> w <code>/etc/plantpi/config.toml</code> albo zamień końce rurki.</div>
+  </div>
+</section>
+
+<section aria-labelledby="h-pump">
+  <h2 id="h-pump">2. Co się dzieje w środku pompy (widok z góry)</h2>
+  <div class="panel" style="display:grid; gap:12px">
+    <svg id="pump" viewBox="0 0 900 420" role="img" aria-label="Animacja widoku z góry: trzy rolki obracają się zgodnie z ruchem wskazówek zegara, ściskają rurkę o ściankę obudowy i przesuwają porcje wody od lewej szczeliny (wejście) do prawej (wyjście)"></svg>
+    <div class="controls">
+      <button id="play" type="button" aria-pressed="true">Pauza</button>
+      <label for="anim">Tempo animacji <input id="anim" type="range" min="1" max="8" step="1" value="3"> <span id="animv">×3</span></label>
+    </div>
+    <div class="legend">
+      <span><i style="background:var(--water)"></i>woda w rurce</span>
+      <span><i style="background:#0b3d6b"></i>porcja wody zamknięta między dwiema rolkami</span>
+      <span><i style="background:var(--roller)"></i>rolka ściska rurkę (szczelnie)</span>
+    </div>
+  </div>
+  <p>Rolka zgniata rurkę o ściankę i jedzie dalej, pchając wodę przed sobą. Za rolką rurka wraca do okrągłego
+  kształtu i robi podciśnienie, które zasysa nową wodę z wiadra. Zawsze co najmniej jedna rolka trzyma rurkę
+  zamkniętą, więc gdy silnik stoi, woda nie cieknie i nie zrobi się lewar.</p>
+</section>
+
+<section aria-labelledby="h-more">
+  <h2 id="h-more">3. Czy może lać więcej?</h2>
+  <p>Trochę tak, ale niewiele. 28BYJ-48 ma przekładnię 1:64, więc robi około 10 obrotów na minutę i ma mało siły.
+  Każdy obrót przepycha tylko tyle wody, ile mieści się w rurce na jednym okrążeniu. Pobaw się liczbami:</p>
+  <div class="panel" style="display:grid; gap:14px">
+    <div class="controls">
+      <label for="tube">Rurka (wewn. × zewn.)
+        <select id="tube">
+          <option value="2,4" selected>2 × 4 mm (obecny projekt)</option>
+          <option value="3,5">3 × 5 mm</option>
+          <option value="4,6">4 × 6 mm</option>
+        </select></label>
+      <label for="delay">Czas kroku <input id="delay" type="range" min="2" max="6" step="0.5" value="3"> <span id="delayv" class="mono">3.0 ms</span></label>
+      <label for="dose">Dawka <input id="dose" type="number" min="5" max="500" step="5" value="100"> ml</label>
+    </div>
+    <div class="tiles">
+      <div class="tile"><div class="v" id="t-rpm">9.8</div><div class="k">obrotów / min</div></div>
+      <div class="tile"><div class="v" id="t-rev">0.29</div><div class="k">ml na obrót (teoria)</div></div>
+      <div class="tile"><div class="v" id="t-min">2.9</div><div class="k">ml / min</div></div>
+      <div class="tile"><div class="v" id="t-dose">34 min</div><div class="k">czas na dawkę</div></div>
+      <div class="tile"><div class="v" id="t-force">×1.0</div><div class="k">siła potrzebna vs 2×4</div></div>
+    </div>
+    <div id="verdict" class="msg">…</div>
+  </div>
+  <div class="panel wide">
+    <table>
+      <thead><tr><th>Sposób</th><th>Ile więcej</th><th>Co trzeba zrobić</th><th>Ryzyko</th></tr></thead>
+      <tbody>
+        <tr><td>Szybszy krok: 2 ms zamiast 3 ms</td><td class="num">×1.5</td><td><code>step_delay_ms = 2.0</code> w configu</td><td>poniżej ~2 ms silnik gubi kroki i tylko buczy</td></tr>
+        <tr><td>Grubsza rurka 3 × 5 mm</td><td class="num">×2.3</td><td>w skrypcie Fusion <code>tube_id=3, tube_od=5</code>, wydrukować nową obudowę i rolki</td><td>silnik potrzebuje więcej siły; jeśli staje, <code>occlusion = 0.75</code></td></tr>
+        <tr><td>Oba naraz</td><td class="num">×3.4</td><td>jak wyżej</td><td>na granicy możliwości 28BYJ-48</td></tr>
+        <tr><td>Pompa 12 V z zamówienia (AD20P) + przekaźnik</td><td class="num">×1000</td><td>inny kod sterujący (czas zamiast kroków), zasilacz 12 V</td><td>trzeba z powrotem pływaka albo sondy w wiadrze; leje bardzo szybko</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>Dla kwiatka wolno nie znaczy źle. 30–100 ml co kilka godzin wystarcza, a powolne kapanie ziemia wchłania
+  lepiej niż chlust. Program ma limit 20 minut na jedno podlewanie: przy rurce 2 × 4 to około 60 ml, przy 3 × 5 około 130 ml.</p>
+</section>
+</main>
+
+<script>
+(() => {
+  const NS = "http://www.w3.org/2000/svg";
+  const $ = (id) => document.getElementById(id);
+  const el = (parent, tag, attrs = {}, text) => {
+    const n = document.createElementNS(NS, tag);
+    for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+    if (text !== undefined) n.textContent = text;
+    parent.appendChild(n);
+    return n;
+  };
+  const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+  // ---------------------------------------------------------------- physics shared by both figures
+  const state = { playing: !matchMedia("(prefers-reduced-motion: reduce)").matches, anim: 3, delayMs: 3, tube: [2, 4] };
+  const rpm = () => 60 / (2048 * state.delayMs / 1000);
+  const mlPerRev = (id = state.tube[0], od = state.tube[1]) => {
+    const wall = (od - id) / 2, gap = 2 * wall * 0.85, rollerOut = 14;
+    return Math.PI * (id / 2) ** 2 * 2 * Math.PI * (rollerOut + gap / 2) / 1000;
+  };
+
+  // ---------------------------------------------------------------- figure 2: pump close-up
+  const pump = $("pump");
+  const S = 7;                      // px per mm
+  const C = { x: 450, y: 165 };
+  const RT = 15.7 * S, WALL = 2.5 * S, RC = 13.7 * S, RR = 10 * S, ROLL = 4 * S, LEG = 22 * S, TUBE = 4 * S;
+  const pumpBase = el(pump, "g");
+  const housing = `M${C.x + RT + WALL},${C.y} A${RT + WALL},${RT + WALL} 0 0 0 ${C.x - RT - WALL},${C.y}
+    L${C.x - RT - WALL},${C.y + LEG} L${C.x - RT},${C.y + LEG} L${C.x - RT},${C.y}
+    A${RT},${RT} 0 0 1 ${C.x + RT},${C.y} L${C.x + RT},${C.y + LEG} L${C.x + RT + WALL},${C.y + LEG} Z`;
+  el(pumpBase, "path", { d: housing, fill: "var(--pump)", opacity: "0.9" });
+  const gh = 12.5 * S;
+  el(pumpBase, "rect", { x: C.x - gh, y: C.y + 16 * S, width: 2 * gh, height: 6 * S, rx: 3, fill: "var(--pump)", opacity: "0.9" });
+  // tube path: left leg up (from below the housing), arc over the top, right leg down
+  const EXT = 70;
+  const tubeD = `M${C.x - RC},${C.y + LEG + EXT} L${C.x - RC},${C.y} A${RC},${RC} 0 0 1 ${C.x + RC},${C.y} L${C.x + RC},${C.y + LEG + EXT}`;
+  el(pumpBase, "path", { d: tubeD, fill: "none", stroke: "var(--line)", "stroke-width": TUBE + 4, "stroke-linecap": "butt" });
+  el(pumpBase, "path", { d: tubeD, fill: "none", stroke: "var(--water)", "stroke-width": TUBE - 6, "stroke-linecap": "butt" });
+  const pockets = el(pump, "g");
+  const flowG = el(pump, "g");
+  const pinchG = el(pump, "g");
+  const rotorG = el(pump, "g");
+  el(rotorG, "circle", { cx: C.x, cy: C.y, r: 15.1 * S, fill: "var(--rotor)", opacity: "0.18" });
+  el(rotorG, "circle", { cx: C.x, cy: C.y, r: 5 * S, fill: "var(--rotor)" });
+  el(rotorG, "circle", { cx: C.x, cy: C.y, r: 1.8 * S, fill: "var(--panel)" });
+  const rollers = [0, 1, 2].map(() => {
+    const g = el(rotorG, "g");
+    el(g, "circle", { r: ROLL, fill: "var(--roller)", stroke: "#8a6a0f", "stroke-width": 1.5 });
+    el(g, "circle", { r: 2 * S, fill: "var(--rotor)" });
+    return g;
+  });
+  // labels
+  const lab = (x, y, t, anchor = "middle", size = 15, weight = 600, fill = "var(--ink)") =>
+    el(pump, "text", { x, y, "text-anchor": anchor, "font-size": size, "font-weight": weight, style: `fill:${fill}` }, t);
+  lab(C.x - RC - 30, C.y + LEG + 60, "WEJŚCIE", "end", 17, 700, "var(--water)");
+  lab(C.x - RC - 30, C.y + LEG + 80, "z dna wiadra", "end", 14, 400, "var(--muted)");
+  lab(C.x + RC + 30, C.y + LEG + 60, "WYJŚCIE", "start", 17, 700, "var(--water)");
+  lab(C.x + RC + 30, C.y + LEG + 80, "do doniczki", "start", 14, 400, "var(--muted)");
+  el(pump, "path", { d: `M${C.x - RC - 20},${C.y + LEG + 30} l0,-40`, stroke: "var(--water)", "stroke-width": 3, "marker-end": "url(#ah)" });
+  el(pump, "path", { d: `M${C.x + RC + 20},${C.y + LEG - 10} l0,40`, stroke: "var(--water)", "stroke-width": 3, "marker-end": "url(#ah)" });
+  const defs = el(pump, "defs");
+  const mk = el(defs, "marker", { id: "ah", viewBox: "0 0 10 10", refX: 8, refY: 5, markerWidth: 6, markerHeight: 6, orient: "auto" });
+  el(mk, "path", { d: "M0,0 L10,5 L0,10 z", fill: "var(--water)" });
+  // rotation arrow
+  el(pump, "path", { d: `M${C.x - 40},${C.y - 15.1 * S - 22} A${15.1 * S + 22},${15.1 * S + 22} 0 0 1 ${C.x + 40},${C.y - 15.1 * S - 22}`,
+    fill: "none", stroke: "var(--rotor)", "stroke-width": 2.5, "marker-end": "url(#ahr)" });
+  const mk2 = el(defs, "marker", { id: "ahr", viewBox: "0 0 10 10", refX: 8, refY: 5, markerWidth: 6, markerHeight: 6, orient: "auto" });
+  el(mk2, "path", { d: "M0,0 L10,5 L0,10 z", fill: "var(--rotor)" });
+  lab(C.x, C.y - 15.1 * S - 42, "wirnik kręci się zgodnie z zegarem", "middle", 14, 600, "var(--rotor)");
+  // side notes
+  const note = (x, y, lines, anchor) => lines.forEach((t, i) => lab(x, y + i * 19, t, anchor, 14, i ? 400 : 700, i ? "var(--muted)" : "var(--ink)"));
+  note(70, 90, ["Ścianka obudowy", "rolka dociska do niej rurkę", "(szczelina 1,7 mm)"], "start");
+  note(70, 230, ["Szczeliny wyjściowe", "trzymają rurkę, żeby", "rolki jej nie wciągały"], "start");
+  note(830, 90, ["Porcja wody", "zamknięta między", "dwiema rolkami jedzie", "razem z wirnikiem"], "end");
+  note(830, 230, ["1 obrót ≈ 0,29 ml", "rurka 2 × 4 mm", "~10 obr./min"], "end");
+  el(pump, "line", { x1: 230, y1: 108, x2: C.x - RT - WALL / 2, y2: C.y - 40, stroke: "var(--muted)", "stroke-width": 1 });
+  el(pump, "line", { x1: 230, y1: 248, x2: C.x - gh + 10, y2: C.y + 19 * S, stroke: "var(--muted)", "stroke-width": 1 });
+
+  // path parameter -> point (s in px along the tube centre line)
+  const L1 = LEG + EXT, LA = Math.PI * RC, TOTAL = 2 * L1 + LA;
+  const at = (s) => {
+    if (s < L1) return [C.x - RC, C.y + L1 - s];
+    if (s < L1 + LA) { const th = Math.PI + (s - L1) / RC; return [C.x + RC * Math.cos(th), C.y + RC * Math.sin(th)]; }
+    return [C.x + RC, C.y + (s - L1 - LA)];
+  };
+  const dots = [];
+  const NDOT = 34;
+  for (let i = 0; i < NDOT; i++) dots.push({ s: (i / NDOT) * TOTAL, n: el(flowG, "circle", { r: 3.2, fill: "#ffffff", opacity: "0.85" }) });
+
+  let phi = -Math.PI / 2;           // first roller at the top
+  function drawPump() {
+    pinchG.replaceChildren(); pockets.replaceChildren();
+    const angs = [0, 1, 2].map((k) => phi + k * 2 * Math.PI / 3);
+    const onArc = (a) => Math.sin(a) < -0.02;
+    angs.forEach((a, k) => {
+      rollers[k].setAttribute("transform", `translate(${C.x + RR * Math.cos(a)},${C.y + RR * Math.sin(a)})`);
+      if (onArc(a)) {
+        const x = C.x + RC * Math.cos(a), y = C.y + RC * Math.sin(a);
+        const deg = a * 180 / Math.PI + 90;
+        el(pinchG, "rect", { x: -6, y: -(TUBE / 2 + 2), width: 12, height: TUBE + 4, fill: "var(--line)",
+          transform: `translate(${x},${y}) rotate(${deg - 90})` });
+      }
+    });
+    // pockets: water between two pinching rollers
+    const norm = (a) => ((a % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+    const arcAs = angs.filter(onArc).map(norm).sort((p, q) => p - q);
+    for (let i = 0; i + 1 < arcAs.length; i++) {
+      const a0 = arcAs[i] + 0.12, a1 = arcAs[i + 1] - 0.12;
+      if (a1 - a0 > 0.2 && a1 - a0 < 2.2) {
+        el(pockets, "path", { d: `M${C.x + RC * Math.cos(a0)},${C.y + RC * Math.sin(a0)} A${RC},${RC} 0 0 1 ${C.x + RC * Math.cos(a1)},${C.y + RC * Math.sin(a1)}`,
+          fill: "none", stroke: "#0b3d6b", "stroke-width": TUBE - 6, opacity: "0.75" });
+      }
+    }
+    dots.forEach((d) => { const [x, y] = at(d.s); d.n.setAttribute("cx", x); d.n.setAttribute("cy", y); });
+  }
+
+  // ---------------------------------------------------------------- figure 1: whole system
+  const sys = $("sys");
+  const T = { x0: 60, x1: 300, top: 130, bot: 360 };      // bucket
+  const sdefs = el(sys, "defs");
+  const mk3 = el(sdefs, "marker", { id: "ah3", viewBox: "0 0 10 10", refX: 8, refY: 5, markerWidth: 6, markerHeight: 6, orient: "auto" });
+  el(mk3, "path", { d: "M0,0 L10,5 L0,10 z", fill: "var(--water)" });
+  const waterRect = el(sys, "path", { fill: "var(--water-soft)" });
+  el(sys, "path", { d: `M${T.x0},${T.top} L${T.x0 + 14},${T.bot} L${T.x1 - 14},${T.bot} L${T.x1},${T.top}`, fill: "none", stroke: "var(--muted)", "stroke-width": 3 });
+  el(sys, "rect", { x: T.x0 - 10, y: T.top - 12, width: T.x1 - T.x0 + 20, height: 12, rx: 3, fill: "var(--line)", stroke: "var(--muted)" });
+  // tank probe
+  el(sys, "rect", { x: 92, y: 80, width: 16, height: 272, rx: 3, fill: "var(--ink)" });
+  el(sys, "line", { x1: 92, y1: 230, x2: 108, y2: 230, stroke: "var(--panel)", "stroke-width": 2 });
+  el(sys, "text", { x: 100, y: 72, "text-anchor": "middle", "font-size": 12, style: "fill:var(--muted)" }, "sonda zbiornika");
+  el(sys, "text", { x: 88, y: 234, "text-anchor": "end", "font-size": 11, style: "fill:var(--muted)" }, "MAX");
+  // pump on the lid
+  const PX = 230, PY = 92;
+  el(sys, "rect", { x: PX - 38, y: PY - 26, width: 76, height: 40, rx: 8, fill: "var(--pump)" });
+  el(sys, "circle", { cx: PX, cy: PY - 6, r: 13, fill: "var(--panel)", opacity: "0.9" });
+  const sysRotor = el(sys, "g");
+  [0, 1, 2].forEach(() => el(sysRotor, "circle", { r: 3.5, fill: "var(--roller)" }));
+  el(sys, "rect", { x: PX - 22, y: PY + 14, width: 44, height: 30, rx: 4, fill: "#aeb8bf" });
+  el(sys, "text", { x: PX, y: PY + 33, "text-anchor": "middle", "font-size": 10, style: "fill:#17232b" }, "28BYJ-48");
+  el(sys, "text", { x: PX, y: PY - 36, "text-anchor": "middle", "font-size": 14, "font-weight": 700 }, "POMPA na pokrywie");
+  // tubes
+  const inletPts = [[178, 343], [190, 343], [204, 330], [204, 120], [212, 100], [PX - 14, PY - 2]];
+  const outletPts = [[PX + 14, PY - 2], [262, 70], [380, 40], [560, 50], [650, 110], [690, 168]];
+  const poly = (pts) => "M" + pts.map((p) => p.join(",")).join(" L");
+  for (const pts of [inletPts, outletPts]) {
+    el(sys, "path", { d: poly(pts), fill: "none", stroke: "var(--line)", "stroke-width": 9, "stroke-linejoin": "round" });
+    el(sys, "path", { d: poly(pts), fill: "none", stroke: "var(--water)", "stroke-width": 4.5, "stroke-linejoin": "round" });
+  }
+  el(sys, "rect", { x: 166, y: 337, width: 14, height: 12, rx: 2, fill: "#78909c" });
+  // pot
+  const POT = { x0: 600, x1: 800, top: 200, bot: 370 };
+  el(sys, "path", { d: `M${POT.x0},${POT.top} L${POT.x0 + 24},${POT.bot} L${POT.x1 - 24},${POT.bot} L${POT.x1},${POT.top} Z`, fill: "#a1887f", stroke: "#4e342e", "stroke-width": 2.5 });
+  const soil = el(sys, "path", { d: `M${POT.x0 + 8},${POT.top + 14} L${POT.x1 - 8},${POT.top + 14} L${POT.x1 - 28},${POT.bot - 8} L${POT.x0 + 28},${POT.bot - 8} Z`, fill: "var(--soil)" });
+  const wet = el(sys, "ellipse", { cx: 690, cy: POT.top + 40, rx: 10, ry: 6, fill: "#2b1a10", opacity: "0.0" });
+  el(sys, "path", { d: "M720,214 C 708,160 744,130 726,82", fill: "none", stroke: "#2e7d32", "stroke-width": 5 });
+  [[700, 130, 22], [752, 108, 24], [716, 90, 18]].forEach(([x, y, r]) => el(sys, "ellipse", { cx: x, cy: y, rx: r, ry: r * 0.55, fill: "#43a047" }));
+  el(sys, "rect", { x: 760, y: 150, width: 12, height: 130, rx: 2, fill: "var(--ink)" });
+  el(sys, "line", { x1: 760, y1: 214, x2: 772, y2: 214, stroke: "var(--panel)", "stroke-width": 2 });
+  // labels
+  const st = (x, y, t, a = "start", w = 700, c = "var(--ink)", s = 14) => el(sys, "text", { x, y, "text-anchor": a, "font-weight": w, "font-size": s, style: `fill:${c}` }, t);
+  st(180, 385, "1  koniec na dnie + obciążnik", "middle", 700, "var(--water)");
+  st(420, 30, "2  pompa przepycha wodę →", "middle", 700, "var(--water)");
+  st(650, 185, "3", "end", 700, "var(--water)");
+  st(808, 300, "DONICZKA", "start", 700, "var(--ink)");
+  st(808, 318, "z sondą", "start", 400, "var(--muted)");
+  st(150, 300, "WIADRO", "middle", 700, "var(--ink)");
+  st(470, 150, "koniec rurki nad ziemią,", "middle", 400, "var(--muted)", 13);
+  st(470, 167, "przypięty do patyczka", "middle", 400, "var(--muted)", 13);
+  const counter = st(470, 215, "", "middle", 600, "var(--ink)", 14);
+  const counter2 = st(470, 234, "", "middle", 400, "var(--muted)", 13);
+  // moving water dots on the tubes + drops
+  const segs = (pts) => {
+    const out = []; let L = 0;
+    for (let i = 0; i + 1 < pts.length; i++) { const d = Math.hypot(pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1]); out.push([pts[i], pts[i + 1], L, d]); L += d; }
+    return { out, L };
+  };
+  const pIn = segs(inletPts), pOut = segs(outletPts);
+  const pos = (P, s) => { for (const [a, b, L0, d] of P.out) if (s <= L0 + d) { const f = (s - L0) / d; return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f]; } return P.out.at(-1)[1]; };
+  const sdots = [];
+  for (const P of [pIn, pOut]) for (let i = 0; i < Math.round(P.L / 26); i++) sdots.push({ P, s: (i * 26) % P.L, n: el(sys, "circle", { r: 2, fill: "#ffffff" }) });
+  const drops = [];
+
+  let pumped = 0, level = 0.85;
+  function drawSys(dt, dphi) {
+    // water level in the bucket
+    const yTop = T.bot - (T.bot - T.top) * level;
+    const k = (y) => 14 * (T.bot - y) / (T.bot - T.top);
+    waterRect.setAttribute("d", `M${T.x0 + k(yTop)},${yTop} L${T.x1 - k(yTop)},${yTop} L${T.x1 - 14},${T.bot} L${T.x0 + 14},${T.bot} Z`);
+    [...sysRotor.children].forEach((c, i) => { const a = phi + i * 2 * Math.PI / 3; c.setAttribute("cx", PX + 8 * Math.cos(a)); c.setAttribute("cy", PY - 6 + 8 * Math.sin(a)); });
+    const v = dphi * 40;                      // px of tube per frame, tied to the rotor
+    sdots.forEach((d) => { d.s = (d.s + v) % d.P.L; const [x, y] = pos(d.P, d.s); d.n.setAttribute("cx", x); d.n.setAttribute("cy", y); });
+    // drops: one per ~1/6 turn
+    if (dphi > 0 && Math.random() < dphi * 2.2) drops.push({ y: 172, vy: 0, n: el(sys, "ellipse", { cx: 690, cy: 172, rx: 3, ry: 4.5, fill: "var(--water)" }) });
+    for (let i = drops.length - 1; i >= 0; i--) {
+      const d = drops[i]; d.vy += 900 * dt; d.y += d.vy * dt; d.n.setAttribute("cy", d.y);
+      if (d.y > POT.top + 30) { d.n.remove(); drops.splice(i, 1); }
+    }
+    wet.setAttribute("rx", 10 + Math.min(60, pumped * 1.4)); wet.setAttribute("ry", 6 + Math.min(40, pumped * 0.9));
+    wet.setAttribute("opacity", Math.min(0.55, pumped / 40));
+    counter.textContent = `przepompowano ≈ ${pumped.toFixed(1)} ml`;
+    counter2.textContent = `(prawdziwe tempo: ${(mlPerRev() * rpm()).toFixed(1)} ml/min, animacja ×${state.anim})`;
+  }
+
+  // ---------------------------------------------------------------- loop
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.min(0.05, (now - last) / 1000); last = now;
+    let dphi = 0;
+    if (state.playing) {
+      const omega = rpm() / 60 * 2 * Math.PI * state.anim;      // rad/s
+      dphi = omega * dt; phi += dphi;
+      const ds = RC * dphi;
+      dots.forEach((d) => { d.s = (d.s + ds) % TOTAL; });
+      pumped += mlPerRev(2, 4) * dphi / (2 * Math.PI);
+      level -= dphi * 0.0016;
+      if (level < 0.25 || pumped > 45) { level = 0.85; pumped = 0; }
+    }
+    drawPump(); drawSys(dt, dphi);
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+
+  // ---------------------------------------------------------------- controls
+  const play = $("play");
+  const syncPlay = () => { play.textContent = state.playing ? "Pauza" : "Odtwórz"; play.setAttribute("aria-pressed", String(state.playing)); };
+  play.addEventListener("click", () => { state.playing = !state.playing; syncPlay(); });
+  syncPlay();
+  $("anim").addEventListener("input", (e) => { state.anim = +e.target.value; $("animv").textContent = "×" + state.anim; });
+
+  function calc() {
+    state.delayMs = +$("delay").value;
+    state.tube = $("tube").value.split(",").map(Number);
+    $("delayv").textContent = state.delayMs.toFixed(1) + " ms";
+    const r = rpm(), rev = mlPerRev(), mlmin = r * rev, dose = Math.max(1, +$("dose").value || 0);
+    const minutes = dose / mlmin;
+    const force = state.tube[1] / 4;
+    $("t-rpm").textContent = r.toFixed(1);
+    $("t-rev").textContent = rev.toFixed(2);
+    $("t-min").textContent = mlmin.toFixed(1);
+    $("t-dose").textContent = minutes < 60 ? `${Math.round(minutes)} min` : `${(minutes / 60).toFixed(1)} h`;
+    $("t-force").textContent = "×" + force.toFixed(2);
+    const maxMl = mlmin * 20;
+    const v = $("verdict");
+    const notes = [];
+    let bad = false;
+    if (state.delayMs < 2.5) { notes.push("Krok poniżej 2,5 ms: sprawdź testem, czy silnik nie gubi kroków."); bad = true; }
+    if (force > 1.2) { notes.push("Grubsza rurka wymaga więcej siły; jeśli silnik staje, zmniejsz occlusion do 0,75."); bad = true; }
+    if (minutes > 20) { notes.push(`Program podlewa maks. 20 min naraz, czyli ≈ ${Math.round(maxMl)} ml. Większa dawka zostanie ucięta: podziel ją na kilka podlewań albo podnieś MAX_RUN_S w kodzie.`); bad = true; }
+    if (!notes.length) notes.push(`OK: ${dose} ml zmieści się w jednym podlewaniu (limit 20 min ≈ ${Math.round(maxMl)} ml).`);
+    v.textContent = notes.join(" ");
+    v.classList.toggle("bad", bad);
+  }
+  ["tube", "delay", "dose"].forEach((id) => $(id).addEventListener("input", calc));
+  calc();
+})();
+</script>
+</body>
+</html>

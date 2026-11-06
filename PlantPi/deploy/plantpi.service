@@ -1,0 +1,29 @@
+[Unit]
+Description=PlantPi plant watering controller
+Documentation=file:///opt/plantpi/README.md
+After=network.target time-sync.target
+# If it crashes 5 times within 5 minutes, stop trying (prevents a crash loop).
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=notify
+NotifyAccess=main
+User=plantpi
+Group=plantpi
+SupplementaryGroups=gpio dialout
+# lgpio writes small helper files into the working directory
+WorkingDirectory=/var/lib/plantpi
+Environment=PYTHONPATH=/opt/plantpi
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 -m plantpi run
+Restart=on-failure
+RestartSec=5
+# The controller pings systemd every second (every 0.5 s while pumping);
+# if it hangs for 30 s it is killed and restarted.
+WatchdogSec=30
+TimeoutStopSec=30
+UMask=0002
+
+[Install]
+WantedBy=multi-user.target
