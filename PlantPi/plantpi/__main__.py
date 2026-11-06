@@ -8,6 +8,7 @@
   plantpi test relay 1           relay click test
   plantpi test motor 1           motor turns a little back and forth
   plantpi test pump 1            measure the pump's ml per turn
+  plantpi test touch 1           demo: motor turns, stops while you hold the probe
   plantpi pins                   print the wiring table
 
 Add --sim to any command to run it on a laptop without hardware.
@@ -281,6 +282,8 @@ def cmd_test(args) -> int:
             ok = c.test_relay(hw, i, cfg)
         elif args.what == "motor":
             ok = c.test_motor(hw, i, cfg)
+        elif args.what == "touch":
+            ok = c.test_touch(hw, i, cfg, args.seconds, args.delta, args.sensor)
         else:
             ok = c.test_pump(hw, i, cfg, args.turns)
     finally:
@@ -316,9 +319,12 @@ def main(argv=None) -> int:
     c.set_defaults(fn=cmd_calibrate)
 
     t = sub.add_parser("test", parents=[common], help="hardware check after a wiring step")
-    t.add_argument("what", choices=["node", "relay", "motor", "pump"])
+    t.add_argument("what", choices=["node", "relay", "motor", "pump", "touch"])
     t.add_argument("n", type=int, nargs="?", help="pot number: 1 or 2")
     t.add_argument("--turns", type=int, default=20, help="pump test: number of turns")
+    t.add_argument("--seconds", type=float, default=300, help="touch demo: how long (0 = until Ctrl+C)")
+    t.add_argument("--delta", type=int, default=200, help="touch demo: mV drop that counts as 'touched'")
+    t.add_argument("--sensor", help="touch demo: follow another probe, e.g. tank")
     t.set_defaults(fn=cmd_test)
 
     pn = sub.add_parser("pins", help="print the wiring table")

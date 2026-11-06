@@ -1,0 +1,4 @@
+# Keep Linux line endings: the files run on the Raspberry Pi (bash, Python, systemd).
+* text=auto eol=lf
+*.png binary
+*.pdf binary

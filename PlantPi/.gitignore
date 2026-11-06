@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+sim-data/
+*.db
+*.db-wal
+*.db-shm
+calibration.json
+fwtest
+.venv/
+.DS_Store

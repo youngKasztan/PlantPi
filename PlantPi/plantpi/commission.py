@@ -4,6 +4,7 @@
     plantpi test relay 1     relay click test (motor plug may stay in)
     plantpi test motor 1     a few slow turns, no water needed
     plantpi test pump 1      pump N turns into a measuring cup -> ml_per_rev for the config
+    plantpi test touch 1     demo: motor turns, stops while you hold the probe
 
 Every check prints what you should see and what to do if you don't.
 """
@@ -153,3 +154,78 @@ def test_pump(hw, pot: int, cfg, turns: int = 20) -> bool:
     print(f"Put this into /etc/plantpi/config.toml under {p.name}:\n    ml_per_rev = {per_rev:.3f}")
     print(f"With dose_ml = {p.dose_ml:.0f} one watering will take about {p.dose_ml / rate:.1f} min.")
     return True
+
+
+def _median(values):
+    s = sorted(values)
+    return s[len(s) // 2]
+
+
+def test_touch(hw, pot: int, cfg, seconds: float = 300, delta: int = 200, sensor: str | None = None,
+               clock=time) -> bool:
+    """Demo of the control loop: the motor turns while the probe reads 'dry' and stops while you
+    hold the probe in your hand (or put it in water). Let go and it starts again. Ctrl+C ends it."""
+    name = sensor or cfg.pots[pot].sensor
+    print(f"Touch demo - motor {pot + 1} follows probe '{name}'. Ctrl+C to end"
+          + (f" (or it ends after {seconds:.0f} s)." if seconds > 0 else "."))
+    print("Keep the probe in the AIR and don't touch it for the first readings...")
+    vals, last = [], None
+    t_end = clock.monotonic() + 15
+    while len(vals) < 3 and clock.monotonic() < t_end:
+        snap = hw.node_snapshot()
+        if snap is not None and snap.seq != last and name in snap.mv:
+            last = snap.seq
+            vals.append(snap.mv[name])
+        clock.sleep(0.1)
+    if len(vals) < 3:
+        print(f"{BAD}: no readings of '{name}' from the Pico - run:  plantpi test node")
+        return False
+    base = _median(vals)
+    stop_below, go_above = base - delta, base - delta // 2
+    print(f"Start value {base} mV. The motor STOPS below {stop_below} mV and runs again above {go_above} mV.")
+    print("Now grab the probe with your whole hand (or dip it in water), then let go.\n")
+
+    chunk = max(1, int(0.25 / cfg.step_delay_s))      # check the probe 4 times per second
+    running = touched = False
+    stops = starts = steps = 0
+    last_seq = None
+    t_end = clock.monotonic() + seconds if seconds > 0 else float("inf")
+    try:
+        while clock.monotonic() < t_end:
+            snap = hw.node_snapshot()
+            stale = snap is None or snap.age(clock.monotonic()) > cfg.stale_s
+            mv = None if stale else snap.mv.get(name)
+            if mv is None:
+                want = False
+            else:
+                touched = mv < (go_above if touched else stop_below)
+                want = not touched
+            if want and not running:
+                hw.pump_on(pot)
+                running, starts = True, starts + 1
+            elif not want and running:
+                hw.pump_off(pot)
+                running, stops = False, stops + 1
+            seq = snap.seq if snap is not None else None
+            if seq != last_seq:
+                last_seq = seq
+                state = ("MOTOR RUNS" if running else
+                         "STOPPED - no data from the Pico" if mv is None else "STOPPED - probe touched / wet")
+                bar = "#" * max(0, min(30, (base - (mv or base)) * 30 // max(1, 3 * delta)))
+                print(f"  {name} {mv if mv is not None else '----':>4} mV  {bar:<30s} {state}")
+            if running:
+                steps += hw.pump_steps(pot, chunk)
+            else:
+                clock.sleep(0.1)
+    except KeyboardInterrupt:
+        print("\nEnded with Ctrl+C.")
+    finally:
+        hw.pump_off(pot)
+    turns = steps / cfg.steps_per_rev
+    print(f"\nMotor made {turns:.1f} turns, stopped {stops} time(s) because of the probe.")
+    if stops:
+        print(f"{OK}: the motor reacts to the probe.")
+        return True
+    print(f"{BAD}: the motor never stopped. Hold the probe harder / longer (the Pico sends a reading every 2 s),"
+          f" or make it react sooner:  plantpi test touch {pot + 1} --delta 100")
+    return False

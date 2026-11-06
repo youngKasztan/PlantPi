@@ -396,3 +396,34 @@ def test_serial_node_over_a_pty():
         node.close()
         os.close(master)
         os.close(slave)
+
+
+def test_touch_demo_stops_and_restarts(tmp_path, capsys):
+    from plantpi.commission import test_touch
+    cfg, clock, hw, store, ctl = make(tmp_path, start_pct=[10.0])
+    cfg.pots[0].ml_per_rev = 0.0001            # the demo itself must not wet the soil noticeably
+    real = hw.node_snapshot
+    calls = {"n": 0}
+
+    def snap():
+        calls["n"] += 1
+        if 40 <= calls["n"] < 80:
+            hw.moist[0] = 0.8                  # hand on the probe
+        elif calls["n"] >= 80:
+            hw.moist[0] = 0.1                  # let go
+        return real()
+    hw.node_snapshot = snap
+    assert test_touch(hw, 0, cfg, seconds=40, clock=clock) is True
+    out = capsys.readouterr().out
+    assert "STOPPED - probe touched" in out and "MOTOR RUNS" in out
+    assert hw.pumps_running() == []
+    ons = [h for h in hw.history if h[2]]
+    assert len(ons) >= 2                       # ran, stopped, ran again
+
+
+def test_touch_demo_without_node_fails_safely(tmp_path):
+    from plantpi.commission import test_touch
+    cfg, clock, hw, store, ctl = make(tmp_path)
+    hw.node_silent = True
+    assert test_touch(hw, 0, cfg, seconds=5, clock=clock) is False
+    assert hw.pumps_running() == [] and hw.steps_done[0] == 0
